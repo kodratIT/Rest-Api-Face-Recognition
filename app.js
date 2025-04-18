@@ -54,6 +54,7 @@ async function uploadLabeledImages(images, label, userId) {
 
     console.log(`Saving face data to Firestore for userId: ${userId}`);
     await db.collection('faces').doc(userId).set({
+      faceNum:1,
       userId: userId,
       label: label,
       descriptions: descriptions.slice(-10),
@@ -110,11 +111,27 @@ app.post("/check-face", async (req, res) => {
 
     console.log(`Fetching face data for userId: ${userId}`);
     const doc = await db.collection('faces').doc(userId).get();
+
     if (!doc.exists) {
-      return res.status(404).json({ message: "User face data not found." });
+      try {
+        await uploadLabeledImages([File1], label, userId);
+    
+        return res.json({
+          result: {
+            _label: label,
+            _distance: "0.2"
+          }
+        });
+      } catch (error) {
+        console.error("Upload error:", error);
+        return res.status(500).json({ error: "Failed to upload labeled images" });
+      }
     }
+    
 
     const data = doc.data();
+
+
     let descriptions = data.descriptions.map(
       (item) => new Float32Array(item.descriptor)
     );
@@ -137,9 +154,7 @@ app.post("/check-face", async (req, res) => {
 
     console.log(`Matching result:`, matchResult);
 
-    // ✅ Update descriptor jika distance <= 0.4
-    if (matchResult.distance <= 0.4) {
-      console.log(`Distance ${matchResult.distance} <= 0.4, updating descriptors...`);
+    if(data.faceNum < 3){
 
       // Tambah descriptor baru ke array
       data.descriptions.push({
@@ -153,10 +168,27 @@ app.post("/check-face", async (req, res) => {
       await db.collection('faces').doc(userId).update({
         descriptions: data.descriptions,
       });
-
-      console.log(`Face data updated for userId: ${userId} (total descriptors: ${data.descriptions.length})`);
-    }
-
+    }else{
+      // ✅ Update descriptor jika distance <= 0.4
+      if (matchResult.distance <= 0.4) {
+        console.log(`Distance ${matchResult.distance} <= 0.4, updating descriptors...`);
+  
+        // Tambah descriptor baru ke array
+        data.descriptions.push({
+          descriptor: Array.from(detections.descriptor),
+        });
+  
+        // Batasi maksimal 10 descriptor
+        data.descriptions = data.descriptions.slice(-10);
+  
+        // Update Firestore
+        await db.collection('faces').doc(userId).update({
+          descriptions: data.descriptions,
+        });
+  
+        console.log(`Face data updated for userId: ${userId} (total descriptors: ${data.descriptions.length})`);
+      }
+    }  
     res.json({ result: matchResult });
   } catch (error) {
     console.error("Error in /check-face:", error);
@@ -164,7 +196,7 @@ app.post("/check-face", async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+app.listen(3000, '0.0.0.0', () => {
+  console.log("Server running on port 3000");
 });
+
